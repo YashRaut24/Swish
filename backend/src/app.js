@@ -30,12 +30,17 @@ dotenv.config({ path: envPath });
 const app = express();
 
 const corsOptions = {
-  origin: 'https://swish-frontend.onrender.com',
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://swish-frontend.onrender.com'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   optionsSuccessStatus: 200,
 };
+
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
