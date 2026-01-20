@@ -7,14 +7,14 @@ import { sendError, sendSuccess } from '../utils/response.js';
 
 const router = express.Router();
 
-// GET /api/search?q=term
+
 router.get('/search', authMiddleware, async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
     if (!q) return sendSuccess(res, { data: { users: [], posts: [] } });
 
-    // Use regex for partial matching - only search username
-    const searchRegex = new RegExp(q, 'i'); // case-insensitive
+    
+    const searchRegex = new RegExp(q, 'i'); 
 
     const [users, posts] = await Promise.all([
       User.find({ username: searchRegex })

@@ -6,14 +6,9 @@ import registerSockets from './socket/index.js';
 
 const httpServer = createServer(app);
 
-const defaultOrigins = ['http://localhost:5173', 'http://localhost:3000'];
-const corsOrigins = process.env.CLIENT_ORIGIN
-  ? process.env.CLIENT_ORIGIN.split(',').map((origin) => origin.trim())
-  : defaultOrigins;
-
 const io = new Server(httpServer, {
   cors: {
-    origin: corsOrigins,
+    origin: 'http://localhost:3000',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -28,11 +23,11 @@ const PORT = process.env.PORT || 5000;
 const start = async () => {
   try {
     await connectDB();
-    console.log('✅ MongoDB Connected');
+    console.log('Database connection established');
 
     httpServer.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
-        console.warn(`⚠️  Port ${PORT} is busy. Switching to a random available port...`);
+        console.warn(`Port ${PORT} is busy. Switching to a random available port...`);
         const randomServer = httpServer.listen(0, () => {
           const newPort = randomServer.address().port;
           console.log(`\n🚀 Server is running!`);
@@ -45,8 +40,8 @@ const start = async () => {
     });
 
     httpServer.listen(PORT, () => {
-      console.log(`\n🚀 Server is running!`);
-      console.log(`👉 URL: http://localhost:${PORT}`);
+      console.log(`\nApplication server started`);
+      console.log(`Access at: http://localhost:${PORT}`);
     });
   } catch (err) {
     console.error('❌ Server startup failed:', err.message);

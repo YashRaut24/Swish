@@ -8,7 +8,7 @@ import httpStatus from 'http-status';
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-// Configure Cloudinary (will be called when route is hit)
+
 const ensureCloudinaryConfigured = () => {
   if (!cloudinary.config().cloud_name) {
     if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
@@ -25,7 +25,7 @@ const ensureCloudinaryConfigured = () => {
   }
 };
 
-// Upload to Cloudinary using buffer
+
 const uploadToCloudinary = (buffer, resourceType = 'image') => {
   return new Promise((resolve, reject) => {
     try {
@@ -55,7 +55,7 @@ const uploadToCloudinary = (buffer, resourceType = 'image') => {
 
 router.post('/uploads', authMiddleware, upload.array('files'), async (req, res) => {
   try {
-    // Ensure Cloudinary is configured
+    
     ensureCloudinaryConfigured();
     
     console.log('Upload request received:', {

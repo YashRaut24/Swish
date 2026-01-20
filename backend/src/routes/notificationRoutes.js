@@ -6,8 +6,8 @@ import User from '../models/User.js';
 
 const router = express.Router();
 
-// Stubs for notifications
-// List notifications for current user
+
+
 router.get('/notifications', authMiddleware, async (req, res) => {
   try {
     const notifications = await Notification.find({ targetUser: req.user._id })
@@ -16,7 +16,7 @@ router.get('/notifications', authMiddleware, async (req, res) => {
       .populate('post', '_id caption')
       .lean();
     
-    // Clean up stale follow_request notifications
+    
     const me = await User.findById(req.user._id);
     const validFollowRequests = me.followRequests.map(id => id.toString());
     
@@ -26,13 +26,13 @@ router.get('/notifications', authMiddleware, async (req, res) => {
         const actorId = notif.actor?._id?.toString() || notif.actor?.toString();
         if (!validFollowRequests.includes(actorId)) {
           staleNotificationIds.push(notif._id);
-          return false; // Filter out stale
+          return false; 
         }
       }
-      return true; // Keep valid
+      return true; 
     });
     
-    // Delete stale notifications from database
+    
     if (staleNotificationIds.length > 0) {
       await Notification.deleteMany({ _id: { $in: staleNotificationIds } });
       console.log(`Cleaned up ${staleNotificationIds.length} stale follow request notifications`);
@@ -45,7 +45,7 @@ router.get('/notifications', authMiddleware, async (req, res) => {
   }
 });
 
-// Mark one notification as read
+
 router.patch('/notifications/:id/read', authMiddleware, async (req, res) => {
   try {
     await Notification.updateOne({ _id: req.params.id, targetUser: req.user._id }, { read: true });
@@ -55,7 +55,7 @@ router.patch('/notifications/:id/read', authMiddleware, async (req, res) => {
   }
 });
 
-// Mark all as read
+
 router.patch('/notifications/read-all', authMiddleware, async (req, res) => {
   try {
     await Notification.updateMany({ targetUser: req.user._id }, { read: true });

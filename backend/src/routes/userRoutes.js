@@ -7,10 +7,10 @@ import Notification from '../models/Notification.js';
 
 const router = express.Router();
 
-// GET /api/users/:id
+
 router.get('/users/:id', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select('-password');
+    const user = await User.findById(req.params.id).select('-password').populate('eventHostRoles.eventId', 'title').populate('communityRoles.communityId', 'name');
     if (!user) return sendError(res, { status: httpStatus.NOT_FOUND, message: 'User not found' });
     const obj = user.toObject();
     obj.name = obj.name || obj.username;
@@ -21,14 +21,44 @@ router.get('/users/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// PATCH /api/users/me
+
+router.get('/users/me/community-status', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id).populate('followedCommunities', '_id').populate('communities', '_id');
+    const joinRequests = await JoinRequest.find({ userId: req.user._id }).populate('communityId', '_id');
+
+    return sendSuccess(res, {
+      data: {
+        followedCommunities: user.followedCommunities.map(c => c._id.toString()),
+        joinedCommunities: user.communities.map(c => c._id.toString()),
+        joinRequests: joinRequests.map(jr => ({
+          communityId: jr.communityId._id.toString(),
+          status: jr.status
+        }))
+      }
+    });
+  } catch (err) {
+    console.error('Get community status error:', err);
+    return sendError(res, { status: httpStatus.INTERNAL_SERVER_ERROR, message: 'Failed to fetch community status' });
+  }
+});
+
+
 router.patch('/users/me', authMiddleware, async (req, res) => {
   try {
-    const { username, bio, profilePic } = req.body;
+    const { name, username, bio, profilePic, profilePicture, designation, department, subjects } = req.body;
     const updates = {};
+    if (name) updates.username = name;
     if (username) updates.username = username;
     if (bio !== undefined) updates.bio = bio;
     if (profilePic !== undefined) updates.profilePic = profilePic;
+    if (profilePicture !== undefined) updates.profilePic = profilePicture;
+    
+    if (req.user.role === 'Faculty') {
+      if (designation !== undefined) updates.designation = designation;
+      if (department !== undefined) updates.department = department;
+      if (subjects !== undefined) updates.subjects = subjects;
+    }
     const user = await User.findByIdAndUpdate(req.user._id, updates, { new: true, runValidators: true }).select('-password');
     const obj = user.toObject();
     obj.name = obj.name || obj.username;
@@ -39,7 +69,7 @@ router.patch('/users/me', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/users/:id/follow
+
 router.post('/users/:id/follow', authMiddleware, async (req, res) => {
   try {
     const targetId = req.params.id;
@@ -57,12 +87,12 @@ router.post('/users/:id/follow', authMiddleware, async (req, res) => {
     }
 
     if (!alreadyRequested) {
-      target.followRequests.push(req.user._id); // incoming for target
-      req.user.followRequested.push(target._id); // outgoing for me
+      target.followRequests.push(req.user._id); 
+      req.user.followRequested.push(target._id); 
       await target.save();
       await req.user.save();
 
-      // Notification: follow request
+      
       try {
         await Notification.create({
           type: 'follow_request',
@@ -81,18 +111,18 @@ router.post('/users/:id/follow', authMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /api/users/:id/follow (unfollow or cancel request)
+
 router.delete('/users/:id/follow', authMiddleware, async (req, res) => {
   try {
     const targetId = req.params.id;
     const target = await User.findById(targetId);
     if (!target) return sendError(res, { status: httpStatus.NOT_FOUND, message: 'User not found' });
 
-    // Remove following if exists
+    
     target.followers = target.followers.filter((id) => id.toString() !== req.user._id.toString());
     req.user.following = req.user.following.filter((id) => id.toString() !== targetId);
 
-    // Remove pending requests if any
+    
     target.followRequests = target.followRequests.filter((id) => id.toString() !== req.user._id.toString());
     req.user.followRequested = req.user.followRequested.filter((id) => id.toString() !== targetId);
 
@@ -106,7 +136,7 @@ router.delete('/users/:id/follow', authMiddleware, async (req, res) => {
   }
 });
 
-// PATCH /api/users/:id/follow/accept (current user accepts requester :id)
+
 router.patch('/users/:id/follow/accept', authMiddleware, async (req, res) => {
   try {
     const requesterId = req.params.id;
@@ -129,7 +159,7 @@ router.patch('/users/:id/follow/accept', authMiddleware, async (req, res) => {
     
     if (!hasRequest) {
       console.log('No follow request - cleaning up stale notification');
-      // Clean up the stale notification
+      
       try {
         await Notification.deleteMany({
           type: 'follow_request',
@@ -142,18 +172,18 @@ router.patch('/users/:id/follow/accept', authMiddleware, async (req, res) => {
       return sendError(res, { status: httpStatus.NOT_FOUND, message: 'Follow request not found or already processed' });
     }
 
-    // remove pending
+    
     me.followRequests = me.followRequests.filter((id) => id.toString() !== requesterId);
     requester.followRequested = requester.followRequested.filter((id) => id.toString() !== me._id.toString());
 
-    // add follow relationship
+    
     me.followers.push(requester._id);
     requester.following.push(me._id);
 
     await me.save();
     await requester.save();
 
-    // Notification: follow accepted
+    
     try {
       await Notification.create({
         type: 'follow_accept',
@@ -171,7 +201,7 @@ router.patch('/users/:id/follow/accept', authMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /api/users/:id/follow/reject (current user rejects requester :id)
+
 router.delete('/users/:id/follow/reject', authMiddleware, async (req, res) => {
   try {
     const requesterId = req.params.id;
@@ -181,7 +211,7 @@ router.delete('/users/:id/follow/reject', authMiddleware, async (req, res) => {
 
     const hasRequest = me.followRequests.some((id) => id.toString() === requesterId);
     if (!hasRequest) {
-      // Clean up the stale notification
+      
       try {
         await Notification.deleteMany({
           type: 'follow_request',
@@ -206,7 +236,7 @@ router.delete('/users/:id/follow/reject', authMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /api/users/:id/followers (remove a follower)
+
 router.delete('/users/:id/followers', authMiddleware, async (req, res) => {
   try {
     const followerId = req.params.id;
@@ -218,7 +248,7 @@ router.delete('/users/:id/followers', authMiddleware, async (req, res) => {
     const isFollowing = me.followers.map(String).includes(followerId);
     if (!isFollowing) return sendError(res, { status: httpStatus.BAD_REQUEST, message: 'Not a follower' });
 
-    // Remove follower
+    
     me.followers = me.followers.filter((id) => id.toString() !== followerId);
     follower.following = follower.following.filter((id) => id.toString() !== me._id.toString());
 
@@ -229,6 +259,64 @@ router.delete('/users/:id/followers', authMiddleware, async (req, res) => {
   } catch (err) {
     console.error('Remove follower error:', err);
     return sendError(res, { status: httpStatus.INTERNAL_SERVER_ERROR, message: 'Failed to remove follower' });
+  }
+});
+
+
+router.post('/users/:id/mute', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'Faculty') {
+      return sendError(res, { status: httpStatus.FORBIDDEN, message: 'Only faculty can mute students' });
+    }
+
+    const studentId = req.params.id;
+    const student = await User.findById(studentId);
+    
+    if (!student) {
+      return sendError(res, { status: httpStatus.NOT_FOUND, message: 'Student not found' });
+    }
+
+    
+    const isMuted = student.mutedBy.map(String).includes(req.user._id.toString());
+    if (isMuted) {
+      return sendSuccess(res, { data: { message: 'Student already muted' } });
+    }
+
+    student.mutedBy.push(req.user._id);
+    await student.save();
+
+    const obj = student.toObject();
+    obj.name = obj.name || obj.username;
+    return sendSuccess(res, { status: httpStatus.OK, data: { user: obj, message: 'Student muted' } });
+  } catch (err) {
+    console.error('Mute student error:', err);
+    return sendError(res, { status: httpStatus.INTERNAL_SERVER_ERROR, message: 'Failed to mute student' });
+  }
+});
+
+
+router.delete('/users/:id/mute', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role !== 'Faculty') {
+      return sendError(res, { status: httpStatus.FORBIDDEN, message: 'Only faculty can unmute students' });
+    }
+
+    const studentId = req.params.id;
+    const student = await User.findById(studentId);
+    
+    if (!student) {
+      return sendError(res, { status: httpStatus.NOT_FOUND, message: 'Student not found' });
+    }
+
+    student.mutedBy = student.mutedBy.filter((id) => id.toString() !== req.user._id.toString());
+    await student.save();
+
+    const obj = student.toObject();
+    obj.name = obj.name || obj.username;
+    return sendSuccess(res, { status: httpStatus.OK, data: { user: obj, message: 'Student unmuted' } });
+  } catch (err) {
+    console.error('Unmute student error:', err);
+    return sendError(res, { status: httpStatus.INTERNAL_SERVER_ERROR, message: 'Failed to unmute student' });
   }
 });
 

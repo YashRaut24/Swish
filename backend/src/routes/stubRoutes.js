@@ -3,12 +3,12 @@ import { sendSuccess } from '../utils/response.js';
 
 const router = Router();
 
-// Simple in-memory storage for stub data so posts appear after creation
+
 const stubStore = {
 	posts: [],
 };
 
-// Stub endpoints to prevent 404s on the frontend
+
 router.get('/posts', (req, res) => sendSuccess(res, { data: { posts: stubStore.posts } }));
 
 router.post('/posts', (req, res) => {
@@ -35,7 +35,7 @@ router.get('/notifications', (req, res) => sendSuccess(res, { data: { notificati
 
 router.get('/chats', (req, res) => sendSuccess(res, { data: { chats: [] } }));
 
-// Stub upload endpoint to avoid 404; returns a fake URL
+
 router.post('/uploads', (req, res) => {
 	const uploaded = [
 		{ url: 'https://picsum.photos/seed/stub/600/400', type: 'image' },

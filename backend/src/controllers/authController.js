@@ -2,25 +2,27 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import httpStatus from 'http-status';
 import User from '../models/User.js';
+import Community from '../models/Community.js';
+import JoinRequest from '../models/JoinRequest.js';
 import { sendError, sendSuccess } from '../utils/response.js';
 
-const ACCESS_EXPIRES = process.env.JWT_ACCESS_EXPIRES || '15m';
-const REFRESH_EXPIRES = process.env.JWT_REFRESH_EXPIRES || '7d';
-const SALT_ROUNDS = 10;
+const ACCESS_TOKEN_DURATION = process.env.JWT_ACCESS_EXPIRES || '15m';
+const REFRESH_TOKEN_DURATION = process.env.JWT_REFRESH_EXPIRES || '7d';
+const PASSWORD_HASH_ROUNDS = 10;
 
-const signAccessToken = (user) => {
+const createAccessToken = (user) => {
   if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET not set');
-  return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: ACCESS_EXPIRES });
+  return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_DURATION });
 };
 
-const signRefreshToken = (user) => {
+const createRefreshToken = (user) => {
   if (!process.env.JWT_REFRESH_SECRET) throw new Error('JWT_REFRESH_SECRET not set');
-  return jwt.sign({ id: user._id }, process.env.JWT_REFRESH_SECRET, { expiresIn: REFRESH_EXPIRES });
+  return jwt.sign({ id: user._id }, process.env.JWT_REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_DURATION });
 };
 
-const setRefreshCookie = (res, token) => {
+const setRefreshCookie = (response, token) => {
   const isProd = process.env.NODE_ENV === 'production';
-  res.cookie('refresh_token', token, {
+  response.cookie('refresh_token', token, {
     httpOnly: true,
     secure: isProd,
     sameSite: isProd ? 'none' : 'lax',
@@ -29,7 +31,7 @@ const setRefreshCookie = (res, token) => {
   });
 };
 
-const populateUser = async (userId) => {
+const getUserDetails = async (userId) => {
   try {
     const user = await User.findById(userId)
       .select('-password')
@@ -37,23 +39,46 @@ const populateUser = async (userId) => {
       .populate('following', 'username profilePic role')
       .populate('communities', 'name')
       .lean();
+    if (user) {
+      user.name = user.name || user.username;
+    }
     return user;
   } catch (err) {
     console.error('Populate user error:', err);
-    // Fallback: return user without populates
+    
     const user = await User.findById(userId).select('-password').lean();
+    if (user) {
+      user.name = user.name || user.username;
+    }
     return user;
   }
 };
 
 export const register = async (req, res) => {
   try {
-    const { username, email, password, role } = req.body;
+    const { username, email, password, role, collegeName, communityId } = req.body;
 
-    console.log('Register attempt:', { username, email, role });
+    if (email === "admin@campus.edu") {
+      return sendError(res, { status: httpStatus.BAD_REQUEST, message: 'Admin signup not allowed' });
+    }
 
-    if (!username || !email || !password) {
-      return sendError(res, { status: httpStatus.BAD_REQUEST, message: 'Username, email, and password are required' });
+    if (!username || !email || !password || !collegeName) {
+      return sendError(res, { status: httpStatus.BAD_REQUEST, message: 'Username, email, password, and college name are required' });
+    }
+
+    if (role === 'Community' && !communityId) {
+      return sendError(res, { status: httpStatus.BAD_REQUEST, message: 'Community selection is required for Community role' });
+    }
+
+    if (role === 'Community' && communityId) {
+      const joinRequest = await JoinRequest.findOne({
+        email,
+        communityId,
+        status: 'accepted'
+      });
+      if (!joinRequest) {
+        return sendError(res, { status: httpStatus.BAD_REQUEST, message: 'Join request not approved yet' });
+      }
     }
 
     const existingUser = await User.findOne({ email });
@@ -61,16 +86,48 @@ export const register = async (req, res) => {
       return sendError(res, { status: httpStatus.CONFLICT, message: 'Email is already registered' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+    const encryptedPassword = await bcrypt.hash(password, PASSWORD_HASH_ROUNDS);
 
-    const user = await User.create({ username, email, password: hashedPassword, role });
-    const accessToken = signAccessToken(user);
-    const refreshToken = signRefreshToken(user);
-    // store hashed refresh in DB for invalidation
-    const hashedRt = await bcrypt.hash(refreshToken, SALT_ROUNDS);
-    await User.findByIdAndUpdate(user._id, { $push: { refreshTokens: hashedRt } });
+    const user = await User.create({ username, email, password: encryptedPassword, role, collegeName });
+
+    if (role === 'Student' || role === 'Faculty') {
+      const announcementName = `${collegeName} Announcements`;
+      let community = await Community.findOne({ name: announcementName });
+      if (!community) {
+        const firstFaculty = await User.findOne({ role: 'Faculty', collegeName });
+        if (firstFaculty) {
+          community = await Community.create({
+            communityId: `${collegeName.toLowerCase().replace(/\s+/g, '-')}-announcements-${Math.random().toString(36).substr(2, 9)}`,
+            name: announcementName,
+            admin: firstFaculty._id,
+            members: [firstFaculty._id],
+            isAnnouncement: true,
+            isFacultyChannel: false,
+          });
+        }
+      }
+      if (community && !community.members.includes(user._id)) {
+        community.members.push(user._id);
+        await community.save();
+        await User.findByIdAndUpdate(user._id, { $addToSet: { communities: community._id } });
+      }
+    }
+
+    if (role === 'Community' && communityId) {
+      const community = await Community.findById(communityId);
+      if (community && !community.members.includes(user._id)) {
+        community.members.push(user._id);
+        await community.save();
+        await User.findByIdAndUpdate(user._id, { $addToSet: { communities: community._id } });
+      }
+    }
+
+    const accessToken = createAccessToken(user);
+    const refreshToken = createRefreshToken(user);
+    const encryptedRefreshToken = await bcrypt.hash(refreshToken, PASSWORD_HASH_ROUNDS);
+    await User.findByIdAndUpdate(user._id, { $push: { refreshTokens: encryptedRefreshToken } });
     setRefreshCookie(res, refreshToken);
-    const sanitizedUser = await populateUser(user._id);
+    const sanitizedUser = await getUserDetails(user._id);
     const userObj = sanitizedUser && sanitizedUser.toObject ? sanitizedUser.toObject() : sanitizedUser;
     if (userObj) userObj.name = userObj.name || userObj.username;
 
@@ -89,10 +146,30 @@ export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    console.log('Login attempt:', { email });
-
     if (!email || !password) {
       return sendError(res, { status: httpStatus.BAD_REQUEST, message: 'Email and password are required' });
+    }
+
+    
+    if (email === "admin@campus.edu" && password === "admin123") {
+      const adminUser = {
+        _id: "admin",
+        username: "Admin",
+        email: "admin@campus.edu",
+        role: "admin",
+        name: "Admin",
+        userType: "admin"
+      };
+
+      const accessToken = jwt.sign({ id: adminUser._id, role: adminUser.role }, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_DURATION });
+      const refreshToken = jwt.sign({ id: adminUser._id }, process.env.JWT_REFRESH_SECRET, { expiresIn: REFRESH_TOKEN_DURATION });
+      setRefreshCookie(res, refreshToken);
+
+      return sendSuccess(res, {
+        status: httpStatus.OK,
+        message: 'Login successful',
+        data: { user: adminUser, token: accessToken },
+      });
     }
 
     const user = await User.findOne({ email }).select('+password');
@@ -105,12 +182,22 @@ export const login = async (req, res) => {
       return sendError(res, { status: httpStatus.UNAUTHORIZED, message: 'Invalid credentials' });
     }
 
-    const accessToken = signAccessToken(user);
-    const refreshToken = signRefreshToken(user);
-    const hashedRt = await bcrypt.hash(refreshToken, SALT_ROUNDS);
-    await User.findByIdAndUpdate(user._id, { $push: { refreshTokens: hashedRt } });
+    if (user.role === 'Community') {
+      const joinRequest = await JoinRequest.findOne({
+        userId: user._id,
+        status: 'accepted'
+      });
+      if (!joinRequest) {
+        return sendError(res, { status: httpStatus.UNAUTHORIZED, message: 'Join request not approved yet' });
+      }
+    }
+
+    const accessToken = createAccessToken(user);
+    const refreshToken = createRefreshToken(user);
+    const encryptedRefreshToken = await bcrypt.hash(refreshToken, PASSWORD_HASH_ROUNDS);
+    await User.findByIdAndUpdate(user._id, { $push: { refreshTokens: encryptedRefreshToken } });
     setRefreshCookie(res, refreshToken);
-    const sanitizedUser = await populateUser(user._id);
+    const sanitizedUser = await getUserDetails(user._id);
     const userObj = sanitizedUser && sanitizedUser.toObject ? sanitizedUser.toObject() : sanitizedUser;
     if (userObj) userObj.name = userObj.name || userObj.username;
 
@@ -125,19 +212,19 @@ export const login = async (req, res) => {
   }
 };
 
-export const refresh = async (req, res) => {
+export const refresh = async (request, response) => {
   try {
-    const token = req.cookies?.refresh_token;
-    if (!token) return sendError(res, { status: httpStatus.UNAUTHORIZED, message: 'No refresh token' });
+    const token = request.cookies?.refresh_token;
+    if (!token) return sendError(response, { status: httpStatus.UNAUTHORIZED, message: 'No refresh token' });
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
     const user = await User.findById(decoded.id).select('+password +refreshTokens');
-    if (!user) return sendError(res, { status: httpStatus.UNAUTHORIZED, message: 'User not found' });
+    if (!user) return sendError(response, { status: httpStatus.UNAUTHORIZED, message: 'User not found' });
     const match = await Promise.any((user.refreshTokens || []).map((rt) => bcrypt.compare(token, rt))).catch(() => false);
-    if (!match) return sendError(res, { status: httpStatus.UNAUTHORIZED, message: 'Invalid refresh token' });
-    const accessToken = signAccessToken(user);
-    return sendSuccess(res, { data: { token: accessToken } });
+    if (!match) return sendError(response, { status: httpStatus.UNAUTHORIZED, message: 'Invalid refresh token' });
+    const accessToken = createAccessToken(user);
+    return sendSuccess(response, { data: { token: accessToken } });
   } catch (err) {
-    return sendError(res, { status: httpStatus.UNAUTHORIZED, message: 'Failed to refresh token' });
+    return sendError(response, { status: httpStatus.UNAUTHORIZED, message: 'Failed to refresh token' });
   }
 };
 

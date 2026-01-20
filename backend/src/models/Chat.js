@@ -7,6 +7,7 @@ const MessageSchema = new Schema(
     sender: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     text: { type: String, required: true, trim: true, maxlength: 2000 },
     createdAt: { type: Date, default: Date.now },
+    seenBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
   },
   { _id: false },
 );

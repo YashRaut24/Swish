@@ -6,7 +6,7 @@ import { sendError, sendSuccess } from '../utils/response.js';
 
 const router = express.Router();
 
-// GET /api/explore/top - simple trending by likes and comments count
+
 router.get('/explore/top', authMiddleware, async (req, res) => {
   try {
     const posts = await Post.aggregate([
@@ -30,7 +30,7 @@ router.get('/explore/top', authMiddleware, async (req, res) => {
       .populate('author', 'username profilePic role')
       .lean();
 
-    // maintain original order
+    
     const map = new Map(populated.map((p) => [p._id.toString(), p]));
     const ordered = posts.map((p) => map.get(p._id.toString())).filter(Boolean);
     return sendSuccess(res, { data: { posts: ordered } });
@@ -40,7 +40,7 @@ router.get('/explore/top', authMiddleware, async (req, res) => {
   }
 });
 
-// GET /api/explore/hashtags - placeholder
+
 router.get('/explore/hashtags', authMiddleware, async (req, res) => {
   return sendSuccess(res, { data: { hashtags: ['#campus', '#events', '#coding', '#sports'] } });
 });
