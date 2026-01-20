@@ -10,7 +10,7 @@ export const connectSocket = () => {
   if (!token) return null;
   if (socket?.connected) return socket;
 
-  socket = io(import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:5000', {
+  socket = io(import.meta.env.VITE_API_BASE_URL?.replace('/api', '') || 'https://swish-702f.onrender.com', {
     transports: ['websocket'],
     withCredentials: true,
     auth: { token },
