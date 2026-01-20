@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { STORAGE_KEYS } from '../utils/constants';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+const baseURL = import.meta.env.VITE_API_BASE_URL || 'https://swish-702f.onrender.com/api';
 
 const http = axios.create({ baseURL, withCredentials: true, timeout: 20000 });
 
